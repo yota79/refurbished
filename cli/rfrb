@@ -7,7 +7,7 @@ from refurbished import ProductNotFoundError, Store, cli, feedback
 
 
 @click.command()
-@click.argument("country")
+@click.argument("country")  # Riceve la stringa (es: "it,de,uk")
 @click.argument(
     "product_family",
     type=click.Choice(
@@ -52,36 +52,56 @@ def get_products(
     # set feedback
     feedback.set_format(format)
 
-    # creates a store for the selected country
-    store = Store(country)
+    # Separiamo i paesi usando la virgola come divisore e togliendo spazi extra
+    countries = [c.strip().lower() for c in country.split(",")]
+    all_found_products = []
 
-    # checking the selected procuct is supported by refurbished
-    search_products = getattr(store, f"get_{product_family}", None)
-    if not callable(search_products):
-        feedback.echo(
-            f"Product family {product_family} is not supported by refurbished",
-            err=True,
-        )
-        return
+    # Iteriamo su ogni singolo paese richiesto
+    for current_country in countries:
+        # creates a store for the current country
+        try:
+            store = Store(current_country)
+        except Exception as e:
+            feedback.echo(f"Error initializing store '{current_country}': {e}", err=True)
+            continue
 
-    try:
-        products = search_products(
-            min_saving=min_saving,
-            min_saving_percentage=min_saving_percentage,
-            max_price=max_price,
-            max_previous_price=max_previous_price,
-            name=name,
-        )
+        # checking the selected product is supported by refurbished
+        search_products = getattr(store, f"get_{product_family}", None)
+        if not callable(search_products):
+            feedback.echo(
+                f"Product family {product_family} is not supported by refurbished in '{current_country}'",
+                err=True,
+            )
+            continue
 
-        feedback.result(cli.ProductsResult(products))
+        try:
+            products = search_products(
+                min_saving=min_saving,
+                min_saving_percentage=min_saving_percentage,
+                max_price=max_price,
+                max_previous_price=max_previous_price,
+                name=name,
+            )
+            
+            # Aggiungiamo il tag del paese davanti al nome del prodotto per distinguerli nella tabella
+            for p in products:
+                p.name = f"[{current_country.upper()}] {p.name}"
+            
+            # Accumuliamo i prodotti nella lista globale
+            all_found_products.extend(products)
 
-    except ProductNotFoundError:
-        # the selected procuct is not available on this store
-        feedback.echo(
-            f"Product '{product_family}' is "
-            f"not available in the '{country}' store",
-            err=True,
-        )
+        except ProductNotFoundError:
+            # the selected product is not available on this store
+            feedback.echo(
+                f"Product '{product_family}' is not available in the '{current_country}' store",
+                err=True,
+            )
+
+    # Se abbiamo trovato prodotti in almeno uno store, mostriamo la tabella finale
+    if all_found_products:
+        feedback.result(cli.ProductsResult(all_found_products))
+    else:
+        feedback.echo("No products found in any of the specified stores.")
 
 
 if __name__ == "__main__":
